@@ -119,10 +119,10 @@ func (lm *LogManager) Rotate() (err error) {
 				return fmt.Errorf("unable to compress file: %w", err)
 			}
 
-			err = os.Remove(lm.GetCurrentFile())
-			if err != nil {
-				return fmt.Errorf("unable to old log: %w", err)
-			}
+			// err = os.Remove(lm.GetCurrentFile())
+			// if err != nil {
+			// 	return fmt.Errorf("unable to old log: %w", err)
+			// }
 		}
 	}
 
