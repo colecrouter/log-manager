@@ -3,7 +3,7 @@
 go get github.com/Mexican-Man/log-manager
 ```
 
-There are lots of good log rotators out there, but I couldn't find one that gave me the granularity/number of features that I needed. So, I've compiled features from other log rotating packages into this one. If you would think it's missing a feature, please open an issue or PR.
+There are lots of good log rotators out there, but I couldn't find one that gave me the granularity/number of features that I needed. So, I've compiled features from other log rotating packages into this one. If you think it's missing a feature, please open an issue or PR.
 
 ## How to Use
 ```go
