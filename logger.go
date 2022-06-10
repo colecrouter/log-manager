@@ -46,12 +46,12 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	if lm.options.MaxFileSize > 0 {
 		fi, err := lm.logFile.Stat()
 		if err != nil {
-			return 0, fmt.Errorf("unable to stat log file: %w", err)
+			panic(fmt.Errorf("unable to stat log file: %w", err))
 		}
 		if fi.Size() > lm.options.MaxFileSize {
 			err = lm.Rotate()
 			if err != nil {
-				return 0, fmt.Errorf("unable to rotate log file: %w", err)
+				panic(fmt.Errorf("unable to rotate log file: %w", err))
 			}
 		}
 	}
@@ -60,7 +60,7 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	if lm.options.RotationInterval > 0 && time.Since(lm.lastRotation) > lm.options.RotationInterval {
 		err = lm.Rotate()
 		if err != nil {
-			return 0, fmt.Errorf("unable to rotate log file: %w", err)
+			panic(fmt.Errorf("unable to rotate log file: %w", err))
 		}
 	}
 
@@ -93,7 +93,7 @@ func (lm *LogManager) Rotate() (err error) {
 		// Get the file's potential filename
 		newFn, err = lm.getFormattedFilename(lt)
 		if err != nil {
-			return fmt.Errorf("unable to get formatted filename: %w", err)
+			panic(fmt.Errorf("unable to get formatted filename: %w", err))
 		}
 
 		// Check if the file exists
@@ -116,20 +116,20 @@ func (lm *LogManager) Rotate() (err error) {
 		if lm.options.GZIP {
 			err = compress(lm.GetCurrentFile())
 			if err != nil {
-				return fmt.Errorf("unable to compress file: %w", err)
+				panic(fmt.Errorf("unable to compress file: %w", err))
 			}
 
-			// err = os.Remove(lm.GetCurrentFile())
-			// if err != nil {
-			// 	return fmt.Errorf("unable to old log: %w", err)
-			// }
+			err = os.Remove(lm.GetCurrentFile())
+			if err != nil {
+				return fmt.Errorf("unable to old log: %w", err)
+			}
 		}
 	}
 
 	// New log file
 	lm.logFile, err = os.OpenFile(newFn, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("unable to open new log file: %w", err)
+		panic(fmt.Errorf("unable to open new log file: %w", err))
 	}
 
 	// Delete old latest.log
