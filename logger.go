@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,7 @@ type LogManager struct {
 
 	options      LogManagerOptions
 	templater    *template.Template
-	logFile      *os.File
+	currentFile  *os.File
 	lastRotation time.Time
 }
 
@@ -42,16 +43,25 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	defer lm.Unlock()
 
 	// Check if we need to rotate the log file
+	// Check if file exists, if it doesn't, create it (might have gotten deleted)
+	if _, err = os.Stat(lm.currentFile.Name()); errors.Is(err, os.ErrNotExist) {
+		_, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+	}
+
 	// Check file size
 	if lm.options.MaxFileSize > 0 {
-		fi, err := lm.logFile.Stat()
+		fi, err := lm.currentFile.Stat()
 		if err != nil {
-			panic(fmt.Errorf("unable to stat log file: %w", err))
+			err = fmt.Errorf("unable to stat file: %w", err)
+			return 0, fmt.Errorf("unable to stat log file: %w", err)
 		}
 		if fi.Size() > lm.options.MaxFileSize {
 			err = lm.Rotate()
 			if err != nil {
-				panic(fmt.Errorf("unable to rotate log file: %w", err))
+				return 0, fmt.Errorf("unable to rotate log file: %w", err)
 			}
 		}
 	}
@@ -60,11 +70,11 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	if lm.options.RotationInterval > 0 && time.Since(lm.lastRotation) > lm.options.RotationInterval {
 		err = lm.Rotate()
 		if err != nil {
-			panic(fmt.Errorf("unable to rotate log file: %w", err))
+			return 0, fmt.Errorf("unable to rotate log file: %w", err)
 		}
 	}
 
-	return lm.logFile.Write(p)
+	return lm.currentFile.Write(p)
 }
 
 func (lm *LogManager) getFormattedFilename(lt *LogTemplate) (string, error) {
@@ -89,37 +99,48 @@ func (lm *LogManager) Rotate() (err error) {
 
 	// Get correct iteration by checking for existing files
 	// Start at 0, generate a filename, check if it exists, if it does, increment and try again
+	var oldFn string // Check to make sure that the file names are different, otherwise we'll get an infinite loop
 	for {
 		// Get the file's potential filename
 		newFn, err = lm.getFormattedFilename(lt)
 		if err != nil {
-			panic(fmt.Errorf("unable to get formatted filename: %w", err))
+			return fmt.Errorf("unable to get formatted filename: %w", err)
 		}
 
+		// Check if filename is different from old filename, otherwise return nothing, keep current file
+		if oldFn == newFn {
+			return
+		}
+		oldFn = newFn
+
 		// Check if the file exists
-		if _, err := os.Stat(newFn); os.IsNotExist(err) {
+		_, err = os.Stat(newFn)
+		if errors.Is(err, os.ErrNotExist) {
 			break
+		} else if err != nil {
+			return fmt.Errorf("unable to stat file: %w", err)
 		}
 
 		// If it does exist, increment the count and try again
 		lt.Iteration++
 	}
 
-	if lm.logFile != nil {
+	if lm.currentFile != nil {
 		// Close the old log file
-		err = lm.logFile.Close()
+		err = lm.currentFile.Close()
 		if err != nil {
 			return
 		}
 
 		// Compress the old log file
 		if lm.options.GZIP {
-			err = compress(lm.GetCurrentFile())
+			// This won't throw an error if the file is empty(?), but it won't create a gzip file
+			err = compress(lm.currentFile.Name())
 			if err != nil {
-				panic(fmt.Errorf("unable to compress file: %w", err))
+				return fmt.Errorf("unable to compress file: %w", err)
 			}
 
-			err = os.Remove(lm.GetCurrentFile())
+			err = os.Remove(lm.currentFile.Name())
 			if err != nil {
 				return fmt.Errorf("unable to old log: %w", err)
 			}
@@ -127,9 +148,9 @@ func (lm *LogManager) Rotate() (err error) {
 	}
 
 	// New log file
-	lm.logFile, err = os.OpenFile(newFn, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	lm.currentFile, err = os.OpenFile(newFn, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		panic(fmt.Errorf("unable to open new log file: %w", err))
+		return fmt.Errorf("unable to open new log file: %w", err)
 	}
 
 	// Delete old latest.log
@@ -146,7 +167,7 @@ func (lm *LogManager) setSymlink() (err error) {
 	os.Remove(latestDotLog)
 	if lm.options.LatestDotLog {
 		// Create symlink to current log file
-		err = os.Symlink(lm.logFile.Name(), latestDotLog)
+		err = os.Symlink(lm.currentFile.Name(), latestDotLog)
 		if err != nil {
 			return fmt.Errorf("unable to create symlink: %w", err)
 		}
@@ -154,12 +175,8 @@ func (lm *LogManager) setSymlink() (err error) {
 	return
 }
 
-func (lm *LogManager) GetCurrentFile() string {
-	return lm.logFile.Name()
-}
-
 // Create a new LogManager. `timeFormat` is the format used in `filenameFormat`. `filenameFormat` is a template string for type LogNameTemplate.
-func New(options LogManagerOptions, nextRotation time.Time) *LogManager {
+func NewLogManager(options LogManagerOptions) *LogManager {
 	lm := LogManager{options: options}
 
 	// Check if the directory exists and create it if it doesn't
@@ -171,24 +188,25 @@ func New(options LogManagerOptions, nextRotation time.Time) *LogManager {
 
 	// Check if filename format is set
 	if options.FilenameFormat == "" {
-		options.FilenameFormat = `{{ .Time.Format "2006-01-02" }}`
+		options.FilenameFormat = `{{ .Time.Format "2006-01-02" }}_{{ .Iteration }}.log`
 	}
 
 	// Validate template string
-	lm.templater, err = template.New("").Parse(options.FilenameFormat + ".log")
+	lm.templater, err = template.New("").Parse(options.FilenameFormat)
 	if err != nil {
 		panic(err)
-	}
-
-	// Check if rotateInterval is smaller than nextRotation - current time
-	if options.RotationInterval < time.Until(nextRotation) {
-		panic("RotateInterval is smaller than nextRotation - current time")
 	}
 
 	// Find the newest log file
 	files, err := os.ReadDir(options.Dir)
 	if err != nil {
 		panic(err)
+	}
+
+	// If latest.log exists, but options.LatestDotLog is false, remove it
+	if !options.LatestDotLog {
+		latestDotLog := filepath.Join(options.Dir, "latest.log")
+		os.Remove(latestDotLog)
 	}
 
 	// Find the newest file
@@ -206,11 +224,13 @@ func New(options LogManagerOptions, nextRotation time.Time) *LogManager {
 		}
 	}
 
+	// If there is a newest file, open it
 	if newestFile != "" {
-		lm.logFile, err = os.OpenFile(filepath.Join(lm.options.Dir, newestFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		lm.currentFile, err = os.OpenFile(filepath.Join(lm.options.Dir, newestFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
+		// If there is no newest file, create a new one
 	} else {
 		err = lm.Rotate()
 		if err != nil {
@@ -224,14 +244,18 @@ func New(options LogManagerOptions, nextRotation time.Time) *LogManager {
 		panic(err)
 	}
 
-	// Approx "last rotation time"
-	lm.lastRotation = nextRotation.Add(-options.RotationInterval)
-
 	// Start goroutine to rotate log file
-	go func() {
-		<-time.After(time.Until(nextRotation))
-		lm.Rotate()
-	}()
+	if options.RotationInterval != 0 {
+		// Calculate next rotation time
+		nextRotation := time.Now().Round(options.RotationInterval).Add(options.RotationInterval)
+		// Approx last rotation time
+		lm.lastRotation = nextRotation.Add(-options.RotationInterval)
+
+		go func() {
+			<-time.After(time.Until(nextRotation))
+			lm.Rotate()
+		}()
+	}
 
 	return &lm
 }

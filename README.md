@@ -14,7 +14,7 @@ import (
 manager := lm.New(lm.LogManagerOptions{
     Dir:              "/path/to/logs",
     RotationInterval: time.Hour * 24,
-}, time.Now().Add(time.Hour*24).Truncate(time.Hour*24))
+})
 
 log.SetOutput(manager)
 ```
@@ -39,9 +39,18 @@ type LogTemplate struct {
 
 When rotating, `Interation` will increase if another log with the same name already exists. If increasing the iteration does not solve the issue, it will throw an error, and continue writing to the old log.
 
-Here's an example:
+Here's the default, if not defined in `LogManagerOptions{}`:
 ```go
-{{ .Time.Format "2006-01-02" }}{{ if .Iteration }}_{{ .Iteration }}{{ end }}
+{{ .Time.Format "2006-01-02" }}_{{ .Iteration }}.log
+```
+This will print create logs like this:
+- 2022-05-17_0.log
+- 2022-05-17_1.log
+- 2022-05-18_0.log
+
+Here's another example:
+```go
+{{ .Time.Format "2006-01-02" }}{{ if .Iteration }}_{{ .Iteration }}{{ end }}.log
 ```
 This will print create logs like this:
 - 2022-05-17.log
@@ -51,13 +60,12 @@ This will print create logs like this:
 > Note that the date format is the [Go's standard date formatting](https://pkg.go.dev/time#Time.Format).
 
 ### Scheduled Rotation
-You can set `RotationInterval` to indicate when your logs should rotate. This does not affect when the next rotation will occur. You can change that in the `New(lm.LogTemplate{}, [offset_time])`. For example, a `RotationInterval` of
+You can set `RotationInterval` to indicate when your logs should rotate. For example, a `RotationInterval` of
 ```go
 time.Hour * 24
 ```
-and a `offset_time` of
+would ensure that logs are rotated everyday, at midnight. A `RotationInterval` of
 ```go
-time.Now().Add(time.Hour*24).Truncate(time.Hour*24)
+time.Hour * 12
 ```
-(like in the example at the top) will ensure that logs are rotated every 24 hours, at midnight.
-
+would ensure that logs are rotated everyday, at midnight and noon.
