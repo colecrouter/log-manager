@@ -247,7 +247,7 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 	// Start goroutine to rotate log file
 	if options.RotationInterval != 0 {
 		// Calculate next rotation time
-		nextRotation := time.Now().Round(options.RotationInterval).Add(options.RotationInterval)
+		nextRotation := time.Now().Truncate(options.RotationInterval).Add(options.RotationInterval)
 		// Approx last rotation time
 		lm.lastRotation = nextRotation.Add(-options.RotationInterval)
 
