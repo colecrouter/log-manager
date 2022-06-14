@@ -11,7 +11,7 @@ import (
     lm "github.com/Mexican-Man/log-manager"
 )
 
-manager := lm.New(lm.LogManagerOptions{
+manager := lm.NewLogManager(lm.LogManagerOptions{
     Dir:              "/path/to/logs",
     RotationInterval: time.Hour * 24,
 })
