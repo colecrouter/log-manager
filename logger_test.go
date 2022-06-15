@@ -74,6 +74,55 @@ func TestRotation(t *testing.T) {
 	}
 }
 
+func TestScheduledRotation(t *testing.T) {
+	lm := setup(LogManagerOptions{
+		RotationInterval: time.Second,
+	})
+
+	// Write to log file
+	lm.Write([]byte("test1"))
+
+	// Wait for rotation
+	time.Sleep(time.Second)
+
+	// Write to log file
+	lm.Write([]byte("test2"))
+
+	// Check that log file was rotated
+	f, _ := os.OpenFile(lm.currentFile.Name(), os.O_RDONLY, 0644)
+	b := make([]byte, 5)
+	_, err := f.Read(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) == "test1" {
+		t.Fatal("Log file was not rotated")
+	} else if string(b) != "test2" {
+		t.Fatal("Log file contains wrong string")
+	}
+}
+
+func TestFilesizeRotation(t *testing.T) {
+	lm := setup(LogManagerOptions{
+		MaxFileSize: 10,
+	})
+
+	// Get old filename
+	old := lm.currentFile.Name()
+
+	// Write to log file
+	lm.Write([]byte("1234567890"))
+
+	// Write to log file again (this should rotate)
+	lm.Write([]byte("test"))
+
+	// Check if file was rotated
+	new := lm.currentFile.Name()
+	if old == new {
+		t.Error("Log file was not rotated")
+	}
+}
+
 func TestGZIP(t *testing.T) {
 	lm := setup(LogManagerOptions{
 		GZIP: true,

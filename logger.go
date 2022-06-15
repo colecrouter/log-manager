@@ -45,7 +45,10 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	// Check if we need to rotate the log file
 	// Check if file exists, if it doesn't, create it (might have gotten deleted)
 	if _, err = os.Stat(lm.currentFile.Name()); errors.Is(err, os.ErrNotExist) {
-		_, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		lm.Unlock()
+		err = lm.Rotate()
+		lm.Lock()
+		// _, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return
 		}
@@ -53,13 +56,18 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 
 	// Check file size
 	if lm.options.MaxFileSize > 0 {
+		// Get file size
 		fi, err := lm.currentFile.Stat()
 		if err != nil {
 			err = fmt.Errorf("unable to stat file: %w", err)
 			return 0, fmt.Errorf("unable to stat log file: %w", err)
 		}
-		if fi.Size() > lm.options.MaxFileSize {
+
+		// Check if file is too big
+		if fi.Size() >= lm.options.MaxFileSize {
+			lm.Unlock()
 			err = lm.Rotate()
+			lm.Lock()
 			if err != nil {
 				return 0, fmt.Errorf("unable to rotate log file: %w", err)
 			}
@@ -68,7 +76,9 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 
 	// Check time
 	if lm.options.RotationInterval > 0 && time.Since(lm.lastRotation) > lm.options.RotationInterval {
+		lm.Unlock()
 		err = lm.Rotate()
+		lm.Lock()
 		if err != nil {
 			return 0, fmt.Errorf("unable to rotate log file: %w", err)
 		}
