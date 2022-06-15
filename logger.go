@@ -45,10 +45,10 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 	// Check if we need to rotate the log file
 	// Check if file exists, if it doesn't, create it (might have gotten deleted)
 	if _, err = os.Stat(lm.currentFile.Name()); errors.Is(err, os.ErrNotExist) {
-		lm.Unlock()
-		err = lm.Rotate()
-		lm.Lock()
-		// _, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		// lm.Unlock()
+		// err = lm.Rotate()
+		// lm.Lock()
+		_, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return
 		}
@@ -162,6 +162,7 @@ func (lm *LogManager) Rotate() (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to open new log file: %w", err)
 	}
+	fmt.Println("Rotated log file to:", lm.currentFile.Name())
 
 	// Delete old latest.log
 	err = lm.setSymlink()
