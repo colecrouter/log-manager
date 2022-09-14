@@ -16,6 +16,7 @@ func setup(options LogManagerOptions) *LogManager {
 	if err != nil {
 		panic(err)
 	}
+	// defer os.RemoveAll(dir)
 	options.Dir = dir
 
 	// Setup log manager
@@ -34,13 +35,23 @@ func TestNextRotation(t *testing.T) {
 		FilenameFormat:   `{{ .Time.Format "2006-01-02" }}.log`,
 	})
 
+	// Write something to the log file
+	lm.Write([]byte("test"))
+
+	// Wait for rotation
 	old := lm.currentFile.Name()
 	time.Sleep(time.Millisecond * 200)
-	new := lm.currentFile.Name()
 
+	// Write something to the log file
+	lm.Write([]byte("test"))
+	// fmt.Println(lm.currentFile.Name())
+
+	// Check if file was rotated
+	new := lm.currentFile.Name()
 	if old != new {
-		t.Error("Log file rotated (was it midnight?)")
+		t.Error("Log file rotated, but it shouldn't have")
 	}
+	lm.Write([]byte("test"))
 
 	// This should work, because we have included a variation for interval, so the file should rotate
 	lm = setup(LogManagerOptions{
@@ -48,12 +59,17 @@ func TestNextRotation(t *testing.T) {
 	})
 
 	old = lm.currentFile.Name()
-	time.Sleep(time.Millisecond * 200)
-	new = lm.currentFile.Name()
 
+	time.Sleep(time.Millisecond * 200)
+
+	lm.Write([]byte("test"))
+
+	new = lm.currentFile.Name()
 	if old == new {
 		t.Error("Log file did not rotate")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestRotation(t *testing.T) {
@@ -72,6 +88,8 @@ func TestRotation(t *testing.T) {
 	if old == new {
 		t.Fatal("Log file did not rotate")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestScheduledRotation(t *testing.T) {
@@ -100,6 +118,8 @@ func TestScheduledRotation(t *testing.T) {
 	} else if string(b) != "test2" {
 		t.Fatal("Log file contains wrong string")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestFilesizeRotation(t *testing.T) {
@@ -111,16 +131,24 @@ func TestFilesizeRotation(t *testing.T) {
 	old := lm.currentFile.Name()
 
 	// Write to log file
-	lm.Write([]byte("1234567890"))
-
-	// Write to log file again (this should rotate)
 	lm.Write([]byte("test"))
 
 	// Check if file was rotated
 	new := lm.currentFile.Name()
+	if old != new {
+		t.Fatal("Log file was rotated")
+	}
+
+	// Write to log file again (this should rotate)
+	lm.Write([]byte("1234567890"))
+
+	// Check if file was rotated
+	new = lm.currentFile.Name()
 	if old == new {
 		t.Error("Log file was not rotated")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestGZIP(t *testing.T) {
@@ -168,6 +196,8 @@ func TestGZIP(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestLatestDotLog(t *testing.T) {
@@ -176,7 +206,7 @@ func TestLatestDotLog(t *testing.T) {
 	})
 
 	// Check that latest.log exists
-	l := filepath.Join(lm.options.Dir, "latest.log")
+	l := filepath.Join(lm.options.Dir, "latest")
 	if _, err := os.Stat(l); err != nil {
 		t.Error(err)
 	}
@@ -215,6 +245,8 @@ func TestLatestDotLog(t *testing.T) {
 	if _, err := os.Stat(l); !errors.Is(err, os.ErrNotExist) {
 		t.Error(err)
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestWrite(t *testing.T) {
@@ -234,6 +266,8 @@ func TestWrite(t *testing.T) {
 	if string(b) != "test" {
 		t.Error("Log file does not contain the string 'test'")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestWriteRotate(t *testing.T) {
@@ -262,6 +296,8 @@ func TestWriteRotate(t *testing.T) {
 	if string(b) != "test2" {
 		t.Error("Log file does not contain the string 'test2'")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestFilenameTemplate(t *testing.T) {
@@ -291,6 +327,8 @@ func TestFilenameTemplate(t *testing.T) {
 	if !strings.HasSuffix(filename, "1.log") {
 		t.Error("Filename is not correct")
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }
 
 func TestFileDeleted(t *testing.T) {
@@ -322,4 +360,6 @@ func TestFileDeleted(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
+	os.RemoveAll(lm.options.Dir)
 }

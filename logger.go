@@ -63,8 +63,8 @@ func (lm *LogManager) Write(p []byte) (n int, err error) {
 			return 0, fmt.Errorf("unable to stat log file: %w", err)
 		}
 
-		// Check if file is too big
-		if fi.Size() >= lm.options.MaxFileSize {
+		// Check if file + our write is greater than the max file size
+		if fi.Size()+int64(len(p)) >= lm.options.MaxFileSize {
 			lm.Unlock()
 			err = lm.Rotate()
 			lm.Lock()
@@ -124,8 +124,7 @@ func (lm *LogManager) Rotate() (err error) {
 		oldFn = newFn
 
 		// Check if the file exists
-		_, err = os.Stat(newFn)
-		if errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(newFn); errors.Is(err, os.ErrNotExist) {
 			break
 		} else if err != nil {
 			return fmt.Errorf("unable to stat file: %w", err)
@@ -162,6 +161,10 @@ func (lm *LogManager) Rotate() (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to open new log file: %w", err)
 	}
+
+	// Update last rotation time
+	lm.lastRotation = time.Now()
+
 	fmt.Println("Rotated log file to:", lm.currentFile.Name())
 
 	// Delete old latest.log
@@ -174,15 +177,16 @@ func (lm *LogManager) Rotate() (err error) {
 }
 
 func (lm *LogManager) setSymlink() (err error) {
-	latestDotLog := filepath.Join(lm.options.Dir, "latest.log")
+	latestDotLog := filepath.Join(lm.options.Dir, "latest")
 	os.Remove(latestDotLog)
-	if lm.options.LatestDotLog {
+	if lm.options.LatestDotLog && lm.currentFile != nil {
 		// Create symlink to current log file
 		err = os.Symlink(lm.currentFile.Name(), latestDotLog)
 		if err != nil {
 			return fmt.Errorf("unable to create symlink: %w", err)
 		}
 	}
+
 	return
 }
 
@@ -208,48 +212,33 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 		panic(err)
 	}
 
-	// Find the newest log file
-	files, err := os.ReadDir(options.Dir)
-	if err != nil {
-		panic(err)
-	}
-
 	// If latest.log exists, but options.LatestDotLog is false, remove it
 	if !options.LatestDotLog {
 		latestDotLog := filepath.Join(options.Dir, "latest.log")
 		os.Remove(latestDotLog)
+		latestDotLog = filepath.Join(options.Dir, "latest")
+		os.Remove(latestDotLog)
 	}
 
-	// Find the newest file
-	var newestFile string
-	var newestTime time.Time
-	for _, f := range files {
-		// Check if the file is a log file
-		if !f.IsDir() && filepath.Ext(f.Name()) != ".gz" {
-			info, _ := f.Info()
-			// If not symlink and newer than current newest file
-			if info.Mode()&os.ModeSymlink == 0 && info.ModTime().After(newestTime) {
-				newestTime = info.ModTime()
-				newestFile = f.Name()
-			}
+	// Read all files in the directory, find the latest one
+	var newestFile *os.FileInfo
+	filepath.Walk(options.Dir, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
 		}
+
+		if newestFile == nil || info.ModTime().After((*newestFile).ModTime()) {
+			newestFile = &info
+		}
+
+		return nil
+	})
+
+	if newestFile == nil {
+		lm.Rotate()
 	}
 
-	// If there is a newest file, open it
-	if newestFile != "" {
-		lm.currentFile, err = os.OpenFile(filepath.Join(lm.options.Dir, newestFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			panic(err)
-		}
-		// If there is no newest file, create a new one
-	} else {
-		err = lm.Rotate()
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	// Delete old latest.log
+	// Set symlink
 	err = lm.setSymlink()
 	if err != nil {
 		panic(err)
