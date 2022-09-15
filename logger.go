@@ -213,9 +213,9 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 	}
 
 	// If latest.log exists, but options.LatestDotLog is false, remove it
+	latestDotLog := filepath.Join(options.Dir, "latest.log")
+	os.Remove(latestDotLog)
 	if !options.LatestDotLog {
-		latestDotLog := filepath.Join(options.Dir, "latest.log")
-		os.Remove(latestDotLog)
 		latestDotLog = filepath.Join(options.Dir, "latest")
 		os.Remove(latestDotLog)
 	}
@@ -223,7 +223,7 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 	// Read all files in the directory, find the latest one
 	var newestFile *os.FileInfo
 	filepath.Walk(options.Dir, func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() {
+		if info.IsDir() || info.Name() == "latest" {
 			return nil
 		}
 
@@ -234,9 +234,16 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 		return nil
 	})
 
-	if newestFile == nil {
+	// If there is a file, open it
+	if newestFile != nil {
+		lm.currentFile, err = os.OpenFile(filepath.Join(options.Dir, (*newestFile).Name()), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			panic(err)
+		}
+	} else {
 		lm.Rotate()
 	}
+	fmt.Println("Current file:", lm.currentFile.Name())
 
 	// Set symlink
 	err = lm.setSymlink()
