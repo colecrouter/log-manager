@@ -25,7 +25,7 @@ log.SetOutput(manager)
 - `FilenameFormat` — Template string using [text/template](https://pkg.go.dev/text/template) (more info below)
 - `MaxFileSize` — How large a file can get before its rotated (0 for no limit)
 - `GZIP` — GZIP old logs
-- `LatestDotLog` — Keeps a symlink called `latest.log` that points to the latest log
+- `LatestDotLog` — Keeps a symlink called `latest` that points to the latest log
 
 ## More Details
 ### `Filenameformat`
