@@ -1,3 +1,6 @@
+// LogManager implements io.Writer from [os], and is meant to be used directly with the [log] package.
+// Use NewLogManager() to create a new LogManager with your desired settings. Upon Write(), it will
+// manage rotation, compression, etc. rather than scheduling rotation.
 package logmanager
 
 import (
@@ -15,6 +18,7 @@ import (
 	"time"
 )
 
+// LogManager is the main struct of the package. It implements io.Writer, and is safe for concurrent use.
 type LogManager struct {
 	sync.Mutex
 
@@ -38,64 +42,7 @@ type LogTemplate struct {
 	Iteration uint
 }
 
-func (lm *LogManager) Write(p []byte) (n int, err error) {
-	lm.Lock()
-	defer lm.Unlock()
-
-	// Check if we need to rotate the log file
-	// Check if file exists, if it doesn't, create it (might have gotten deleted)
-	if _, err = os.Stat(lm.currentFile.Name()); errors.Is(err, os.ErrNotExist) {
-		// lm.Unlock()
-		// err = lm.Rotate()
-		// lm.Lock()
-		_, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return
-		}
-	}
-
-	// Check file size
-	if lm.options.MaxFileSize > 0 {
-		// Get file size
-		fi, err := lm.currentFile.Stat()
-		if err != nil {
-			err = fmt.Errorf("unable to stat file: %w", err)
-			return 0, fmt.Errorf("unable to stat log file: %w", err)
-		}
-
-		// Check if file + our write is greater than the max file size
-		if fi.Size()+int64(len(p)) >= lm.options.MaxFileSize {
-			lm.Unlock()
-			err = lm.Rotate()
-			lm.Lock()
-			if err != nil {
-				return 0, fmt.Errorf("unable to rotate log file: %w", err)
-			}
-		}
-	}
-
-	// Check time
-	if lm.options.RotationInterval > 0 && time.Since(lm.lastRotation) > lm.options.RotationInterval {
-		lm.Unlock()
-		err = lm.Rotate()
-		lm.Lock()
-		if err != nil {
-			return 0, fmt.Errorf("unable to rotate log file: %w", err)
-		}
-	}
-
-	return lm.currentFile.Write(p)
-}
-
-func (lm *LogManager) getFormattedFilename(lt *LogTemplate) (string, error) {
-	buf := new(bytes.Buffer)
-	err := lm.templater.Execute(buf, lt)
-	if err != nil {
-		return "", fmt.Errorf("error executing template: %s", err)
-	}
-	return filepath.Join(lm.options.Dir, buf.String()), nil
-}
-
+// Rotate manually triggers a log rotation
 func (lm *LogManager) Rotate() (err error) {
 	lm.Lock()
 	defer lm.Unlock()
@@ -112,10 +59,12 @@ func (lm *LogManager) Rotate() (err error) {
 	var oldFn string // Check to make sure that the file names are different, otherwise we'll get an infinite loop
 	for {
 		// Get the file's potential filename
-		newFn, err = lm.getFormattedFilename(lt)
+		buf := new(bytes.Buffer)
+		err = lm.templater.Execute(buf, lt)
 		if err != nil {
-			return fmt.Errorf("unable to get formatted filename: %w", err)
+			return fmt.Errorf("error executing template: %s", err)
 		}
+		newFn = filepath.Join(lm.options.Dir, buf.String())
 
 		// Check if filename is different from old filename, otherwise return nothing, keep current file
 		if oldFn == newFn {
@@ -176,6 +125,48 @@ func (lm *LogManager) Rotate() (err error) {
 	return
 }
 
+// Write checks all of the log manager's conditions, potentially triggers a rotation, then writes to a corresponding log file
+func (lm *LogManager) Write(p []byte) (n int, err error) {
+	lm.Lock()
+	defer lm.Unlock()
+
+	// Stat the file
+	fi, err := os.Stat(lm.currentFile.Name())
+
+	// Catch any errors
+	if err != nil {
+		// Check if file exists, if it doesn't, create it (might have gotten deleted)
+		if errors.Is(err, os.ErrNotExist) {
+			_, err = os.OpenFile(lm.currentFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return
+			}
+			// Otherwise, return the error
+		} else {
+			err = fmt.Errorf("unable to stat file: %w", err)
+			return
+		}
+	}
+
+	switch {
+	// If we have a configured max file size, check if file + our write is greater than the max file size
+	case lm.options.MaxFileSize > 0 && fi.Size()+int64(len(p)) >= lm.options.MaxFileSize:
+		fallthrough
+	// If we have a configured rotation interval, check if the current time is greater than the last rotation + the rotation interval
+	case lm.options.RotationInterval > 0 && time.Since(lm.lastRotation) > lm.options.RotationInterval:
+		// Unlock the mutex so we can rotate without deadlocking
+		lm.Unlock()
+		err = lm.Rotate()
+		lm.Lock()
+		if err != nil {
+			return 0, fmt.Errorf("unable to rotate log file: %w", err)
+		}
+	}
+
+	return lm.currentFile.Write(p)
+}
+
+// setSymlink is a helper function to update/create the "latest" symlink in the log directory
 func (lm *LogManager) setSymlink() (err error) {
 	latestDotLog := filepath.Join(lm.options.Dir, "latest")
 	os.Remove(latestDotLog)
@@ -201,7 +192,7 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 		os.Mkdir(options.Dir, 0755)
 	}
 
-	// Check if filename format is set
+	// Check if filename format is set, otherwise use default
 	if options.FilenameFormat == "" {
 		options.FilenameFormat = `{{ .Time.Format "2006-01-02" }}_{{ .Iteration }}.log`
 	}
@@ -234,14 +225,15 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 		return nil
 	})
 
-	// If there is a file, open it
-	if newestFile != nil {
+	if newestFile == nil {
+		// If there is no newest file, create one
+		lm.Rotate()
+	} else {
+		// Otherwise, open it
 		lm.currentFile, err = os.OpenFile(filepath.Join(options.Dir, (*newestFile).Name()), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
-	} else {
-		lm.Rotate()
 	}
 	fmt.Println("Current file:", lm.currentFile.Name())
 
@@ -251,22 +243,18 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 		panic(err)
 	}
 
-	// Start goroutine to rotate log file
 	if options.RotationInterval != 0 {
-		// Calculate next rotation time
-		nextRotation := time.Now().Truncate(options.RotationInterval).Add(options.RotationInterval)
-		// Approx last rotation time
-		lm.lastRotation = nextRotation.Add(-options.RotationInterval)
-
-		go func() {
-			<-time.After(time.Until(nextRotation))
-			lm.Rotate()
-		}()
+		if newestFile != nil {
+			// Since we have a rotation interval, we can accurately estimate the time of the last rotation
+			// We'll look at the modtime of the current file and truncate it to the nearest rotation interval (floor, basically)
+			lm.lastRotation = (*newestFile).ModTime().Truncate(options.RotationInterval)
+		}
 	}
 
 	return &lm
 }
 
+// compress is a helper function to gzip a file
 func compress(filename string) (err error) {
 	// Referenced from https://www.arthurkoziel.com/writing-tar-gz-files-in-go/
 
