@@ -363,3 +363,29 @@ func TestFileDeleted(t *testing.T) {
 
 	os.RemoveAll(lm.options.Dir)
 }
+
+func TestRepeatedCompressionCalls(t *testing.T) {
+	lm := setup(LogManagerOptions{
+		GZIP: true,
+	})
+
+	// Rotate
+	err := lm.Rotate()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate again
+	err = lm.Rotate()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check if file is gzipped
+	_, err = os.Stat(strings.TrimSuffix(lm.currentFile.Name(), ".log") + ".tar.gz")
+	if err != nil {
+		t.Error(err)
+	}
+
+	os.RemoveAll(lm.options.Dir)
+}

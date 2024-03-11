@@ -114,8 +114,6 @@ func (lm *LogManager) Rotate() (err error) {
 	// Update last rotation time
 	lm.lastRotation = time.Now()
 
-	fmt.Println("Rotated log file to:", lm.currentFile.Name())
-
 	// Delete old latest.log
 	err = lm.setSymlink()
 	if err != nil {
@@ -235,7 +233,6 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 			panic(err)
 		}
 	}
-	fmt.Println("Current file:", lm.currentFile.Name())
 
 	// Set symlink
 	err = lm.setSymlink()
@@ -256,6 +253,11 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 
 // compress is a helper function to gzip a file
 func compress(filename string) (err error) {
+	// Prevent compressing a file that's already compressed
+	if strings.HasSuffix(filename, ".tar.gz") {
+		return
+	}
+
 	// Referenced from https://www.arthurkoziel.com/writing-tar-gz-files-in-go/
 
 	// Create writer for our destination archive
