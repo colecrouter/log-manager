@@ -212,7 +212,7 @@ func NewLogManager(options LogManagerOptions) *LogManager {
 	// Read all files in the directory, find the latest one
 	var newestFile *os.FileInfo
 	filepath.Walk(options.Dir, func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() || info.Name() == "latest" {
+		if info.IsDir() || info.Name() == "latest" || info.Name() == "latest.log" || strings.HasSuffix(info.Name(), ".tar.gz") {
 			return nil
 		}
 
