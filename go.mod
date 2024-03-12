@@ -1,3 +1,3 @@
-module github.com/Mexican-Man/log-manager
+module github.com/colecrouter/log-manager
 
 go 1.18
